@@ -1,6 +1,7 @@
 import numpy as np
 
 from sklearn.cluster import KMeans
+from sklearn.neural_network import MLPClassifier
 
 class kmeans:
     def __init__(self, values, number_of_clusters = 2, random_state = 0):
@@ -18,69 +19,79 @@ class kmeans:
     def get_cluster_centers(self):
         return self.clf.cluster_centers_
 
-class RBFNetwork:
-
-    def __init__(self, centers, epochs=100, learning_rate=0.1):
-        self.centers = centers
-        self.number_of_clusters = len(self.centers)
-        self.learning_rate = learning_rate
-        self.epochs = epochs
-        
-        self.weights = np.random.randn(self.number_of_clusters)
-        self.bias = np.random.randn(1)
-  
-    def _activation_function(self, x, center):
+class rbf:
+    def __init__(self, number_of_inputs, number_of_outputs):
+        self.number_of_inputs = number_of_inputs
+        self.number_of_outputs = number_of_outputs
+    
+    def _activation_function(self, x, weights, sigma):
         #Gaussian function
         try:
-            distance = np.linalg.norm(x - center)
-            return np.exp(-(distance ** 2))
+            return np.exp(-np.sum((x-weights)**2, axis=1) / (2 * sigma ** 2))
         except Exception as e:
             print("Ocorreu um erro na função de ativação")
             print(str(e))
             print("x = ",x)
-            print("center = ", center)
+            print("weights = ", weights)
+            print("sigma=  ", sigma)
             exit(0)
+    
+    def fit(self, X, number_of_clusters):
+        kmeansClf = kmeans(X, number_of_clusters)
+        centers = kmeansClf.get_cluster_centers()
+
+        a = [None] * len(centers)
+        for index, center in enumerate(centers):
+            a[index] = self._activation_function(X, center, X.std())
+
+        return dict(output=np.array(a), weights=centers)
+
+
+class RBFNetwork:
+
+    def __init__(self, size_of_inputs, number_of_clusters, number_of_hidden_layers=10, learning_rate=0.1):
+        
+        self.size_of_inputs = size_of_inputs
+        self.number_of_clusters = number_of_clusters
+        self.number_of_hidden_layers = number_of_hidden_layers
+        self.learning_rate = learning_rate
+        
+        self.rbf = rbf(self.size_of_inputs, self.number_of_clusters)
+        self.mlp = MLPClassifier(hidden_layer_sizes=(number_of_hidden_layers), alpha=1e-4,
+                    solver='sgd', verbose=True, tol=1e-4, random_state=1,
+                    learning_rate_init=self.learning_rate)
+
+
+        self.weights = None
+  
+    
   
     def fit(self, training, targets):
-        for epoch in range(self.epochs):
-            for training_index, training_instance in enumerate(training):
-                a = []
-                for index, center in enumerate(self.centers):
-                    a.append(self._activation_function(training_instance, center))
-                
-                a = np.array(a)
-                F = a.T.dot(self.weights) + self.bias
-
-                loss = (targets[training_index] - F).flatten() ** 2
-                # print('Loss: {0:.2f}'.format(loss[0]))
-
-                # backward pass
-                error = -(targets[training_index] - F).flatten()
-
-                # online update
-                self.weights = self.weights - self.learning_rate * a * error
-                self.bias = self.bias - self.learning_rate * error
+        result = self.rbf.fit(training, self.number_of_clusters)
+        self.weights = result['weights']
+        self.mlp.fit(result['output'], targets)
 
     def predict(self, test):
-        y_pred = []
-        for test_index, test in enumerate(test):
-            a = []
-            for index, center in enumerate(self.centers):
-                a.append(self._activation_function(test, center))
-
-            a = np.array(a)
-            F = a.T.dot(self.weights) + self.bias
-            y_pred.append(F)
-        return np.array(y_pred)
+        y_pred = [None] * len(self.weights)
+        try:    
+            for index, weight in enumerate(self.weights):
+                y_pred[index] = self.rbf._activation_function(test, weight, test.std())
+            y_pred = np.array(y_pred)
+            return self.mlp.predict(np.transpose(y_pred))
+        except Exception as e:
+            print("Ocorreu um erro na função de predição do RBFN")
+            print("Exceção: ", str(e))
+            print(y_pred)
+            exit(0)
 
 
 if __name__ == "__main__":
     xor_entry_values = np.array([[0, 0], [0 , 1], [1, 0], [1,1]])
-    xor_targets = np.array([[1], [0], [0], [1]])
+    xor_targets = np.array([0, 1, 1, 0])
     
-    kmeans = kmeans(xor_entry_values)
-    centers = kmeans.get_cluster_centers()
-    rbf = RBFNetwork(centers)
-    rbf.fit(xor_entry_values, xor_targets)
+    rbfn = RBFNetwork(2, 4)
+    rbfn.fit(xor_entry_values, xor_targets)
 
-    print(rbf.predict([[0,0], [0,1], [1,0], [1,1]]))
+    test = np.array([[1,0], [0,1]])
+    result = rbfn.predict(test)
+    print(result)
